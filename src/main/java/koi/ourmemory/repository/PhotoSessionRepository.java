@@ -14,6 +14,9 @@ import java.util.UUID;
 
 @Repository
 public interface PhotoSessionRepository extends JpaRepository<PhotoSession, UUID> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT ps FROM PhotoSession ps WHERE ps.id = :id")
+    java.util.Optional<PhotoSession> findLockedById(@Param("id") UUID id);
 
     Page<PhotoSession> findAllByOrderBySessionDateDesc(Pageable pageable);
 

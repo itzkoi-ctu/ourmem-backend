@@ -21,17 +21,15 @@ public class VideoService {
     private final PhotoSessionRepository sessionRepository;
     private final CloudinaryService cloudinaryService;
     private final SessionMapper sessionMapper;
+    private final MediaReplacementCleanup mediaReplacementCleanup;
 
     public SessionResponse uploadTimelapse(UUID sessionId, MultipartFile file) {
         PhotoSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Session", "id", sessionId));
 
-        // Delete existing video if any
-        if (session.getVideoPublicId() != null) {
-            cloudinaryService.deleteResource(session.getVideoPublicId(), "video");
-        }
-
+        String previousId = session.getVideoPublicId();
         CloudinaryUploadResult result = cloudinaryService.uploadVideo(file);
+        mediaReplacementCleanup.register(previousId, result.getPublicId(), "video");
         session.setVideoUrl(result.getUrl());
         session.setVideoThumbnailUrl(result.getThumbnailUrl());
         session.setVideoPublicId(result.getPublicId());

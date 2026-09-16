@@ -26,6 +26,7 @@ public class SessionController {
 
     private final SessionService sessionService;
     private final VideoService videoService;
+    private final koi.ourmemory.service.VideoProcessingService videoProcessingService;
 
     @PostMapping
     public ResponseEntity<ApiResponse<SessionResponse>> createSession(
@@ -101,16 +102,22 @@ public class SessionController {
 
     // Video timelapse endpoints
     @PostMapping("/{id}/video")
-    public ResponseEntity<ApiResponse<SessionResponse>> uploadTimelapse(
+    public ResponseEntity<ApiResponse<koi.ourmemory.entity.VideoUpload>> uploadTimelapse(
             @PathVariable UUID id,
             @RequestParam("file") MultipartFile file) {
-        SessionResponse response = videoService.uploadTimelapse(id, file);
-        return ResponseEntity.ok(ApiResponse.success(response, "Timelapse uploaded"));
+        var response = videoProcessingService.start(id, file);
+        return ResponseEntity.accepted().body(ApiResponse.success(response, "Video is processing"));
+    }
+
+    @GetMapping("/{id}/video/status")
+    public ResponseEntity<ApiResponse<koi.ourmemory.entity.VideoUpload>> videoStatus(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success(videoProcessingService.latest(id)));
     }
 
     @DeleteMapping("/{id}/video")
     public ResponseEntity<ApiResponse<SessionResponse>> deleteTimelapse(@PathVariable UUID id) {
-        SessionResponse response = videoService.deleteTimelapse(id);
+        videoProcessingService.deleteVideo(id);
+        SessionResponse response = sessionService.getSessionById(id);
         return ResponseEntity.ok(ApiResponse.success(response, "Timelapse deleted"));
     }
 }

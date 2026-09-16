@@ -36,6 +36,7 @@ public class PhotoService {
     private final CloudinaryService cloudinaryService;
     private final PhotoMapper photoMapper;
     private final AuthService authService;
+    private final MediaReplacementCleanup mediaReplacementCleanup;
 
     private static final int MAX_PHOTOS_PER_UPLOAD = 20;
 
@@ -94,6 +95,26 @@ public class PhotoService {
         // Keep photo.isPublic for future fine-grained control, but do not filter it here.
         List<Photo> photos = photoRepository.findBySessionIdOrderBySortOrderAsc(sessionId);
         return photos.stream().map(p -> enrichPhotoResponse(p, null)).collect(Collectors.toList());
+    }
+
+    public PhotoResponse replaceImage(UUID sessionId, UUID photoId, MultipartFile file) {
+        Photo photo = photoRepository.findByIdAndSessionId(photoId, sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Photo", "id", photoId));
+        UUID userId = authService.getCurrentUserId();
+        PhotoSession session = photo.getSession();
+        boolean wasCover = Objects.equals(session.getCoverPhotoUrl(), photo.getThumbnailUrl());
+        String previousId = photo.getCloudinaryPublicId();
+        CloudinaryUploadResult result = cloudinaryService.uploadImage(file);
+        mediaReplacementCleanup.register(previousId, result.getPublicId(), "image");
+        photo.setCloudinaryPublicId(result.getPublicId());
+        photo.setOriginalUrl(result.getUrl());
+        photo.setThumbnailUrl(result.getThumbnailUrl());
+        if (wasCover) {
+            session.setCoverPhotoUrl(result.getThumbnailUrl());
+            sessionRepository.save(session);
+        }
+        // Preserve identity, caption, notes, reactions and order.
+        return enrichPhotoResponse(photoRepository.save(photo), userId);
     }
 
     public PhotoResponse updateCaption(UUID photoId, UpdatePhotoCaptionRequest request) {

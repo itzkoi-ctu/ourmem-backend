@@ -37,6 +37,13 @@ public class PhotoController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @PutMapping(value = "/{photoId}/image", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<PhotoResponse>> replaceImage(
+            @PathVariable UUID sessionId, @PathVariable UUID photoId,
+            @RequestParam("file") MultipartFile file) {
+        return ResponseEntity.ok(ApiResponse.success(photoService.replaceImage(sessionId, photoId, file), "Photo updated"));
+    }
+
     @PatchMapping("/{photoId}/caption")
     public ResponseEntity<ApiResponse<PhotoResponse>> updateCaption(
             @PathVariable UUID sessionId,

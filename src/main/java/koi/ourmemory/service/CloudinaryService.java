@@ -21,6 +21,43 @@ public class CloudinaryService {
 
     private static final long MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
     private static final long MAX_VIDEO_SIZE = 100 * 1024 * 1024; // 100MB
+    public static final String VIDEO_TRANSFORM = "ac_aac,c_limit,f_mp4,h_1920,vc_h264,w_1920";
+    public static final java.util.Set<String> VIDEO_FORMATS = java.util.Set.of("mp4", "mov", "webm", "mkv", "avi", "m4v");
+
+    public String playbackUrl(String publicId) {
+        return cloudinary.url().resourceType("video").type("authenticated").signed(true)
+                .transformation(new com.cloudinary.Transformation().rawTransformation(VIDEO_TRANSFORM))
+                .generate(publicId);
+    }
+
+    public void uploadVideoAsync(MultipartFile file, String publicId, String callback) {
+        validateVideoFile(file);
+        java.nio.file.Path temporary = null;
+        try {
+            // The SDK streams a File, avoiding a 100 MB byte[] on the Fly machine heap.
+            temporary = java.nio.file.Files.createTempFile("ourmemory-video-", ".upload");
+            file.transferTo(temporary);
+            cloudinary.uploader().upload(temporary.toFile(), ObjectUtils.asMap(
+                    "public_id", publicId, "resource_type", "video", "type", "authenticated",
+                    "overwrite", false, "allowed_formats", new java.util.ArrayList<>(VIDEO_FORMATS),
+                    "eager", VIDEO_TRANSFORM, "eager_async", true,
+                    "eager_notification_url", callback));
+        } catch (IOException e) {
+            throw new FileUploadException("Video upload failed; the previous video has not been changed", e);
+        } finally {
+            if (temporary != null) try { java.nio.file.Files.deleteIfExists(temporary); }
+            catch (IOException e) { log.warn("Could not remove temporary video file", e); }
+        }
+    }
+
+    public boolean verifyVideoNotification(String body, String timestamp, String signature) {
+        try {
+            long issuedAt = Long.parseLong(timestamp);
+            long now = java.time.Instant.now().getEpochSecond();
+            return issuedAt <= now + 60 && issuedAt >= now - 7200
+                    && cloudinary.verifyNotificationSignature(body, timestamp, signature, 7200);
+        } catch (RuntimeException e) { return false; }
+    }
 
     public CloudinaryUploadResult uploadImage(MultipartFile file) {
         validateImageFile(file);
@@ -103,6 +140,7 @@ public class CloudinaryService {
      * @param transformation optional transformation, null for original
      */
     public String generateSignedVideoUrl(String publicId, com.cloudinary.Transformation transformation) {
+        if (transformation == null) return playbackUrl(publicId);
         var urlBuilder = cloudinary.url()
                 .type("authenticated")
                 .signed(true)
@@ -135,16 +173,17 @@ public class CloudinaryService {
         }
     }
 
-    private void validateVideoFile(MultipartFile file) {
+    public void validateVideoFile(MultipartFile file) {
         if (file.isEmpty()) {
             throw new FileUploadException("File is empty");
         }
         if (file.getSize() > MAX_VIDEO_SIZE) {
             throw new FileUploadException("Video file size exceeds maximum limit of 100MB");
         }
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.equals("video/mp4")) {
-            throw new FileUploadException("Only MP4 video files are allowed");
+        String name = java.util.Objects.toString(file.getOriginalFilename(), "").toLowerCase(java.util.Locale.ROOT);
+        String extension = name.substring(name.lastIndexOf('.') + 1);
+        if (!VIDEO_FORMATS.contains(extension)) {
+            throw new FileUploadException("Supported videos: MP4, MOV, WebM, MKV, AVI, M4V");
         }
     }
 }
