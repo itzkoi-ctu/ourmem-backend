@@ -40,7 +40,11 @@ public class CloudinaryService {
             cloudinary.uploader().upload(temporary.toFile(), ObjectUtils.asMap(
                     "public_id", publicId, "resource_type", "video", "type", "authenticated",
                     "overwrite", false, "allowed_formats", new java.util.ArrayList<>(VIDEO_FORMATS),
-                    "eager", VIDEO_TRANSFORM, "eager_async", true,
+                    "eager", java.util.List.of(
+    new com.cloudinary.Transformation()
+        .rawTransformation(VIDEO_TRANSFORM)
+),
+"eager_async", true,
                     "eager_notification_url", callback));
         } catch (IOException e) {
             throw new FileUploadException("Video upload failed; the previous video has not been changed", e);
