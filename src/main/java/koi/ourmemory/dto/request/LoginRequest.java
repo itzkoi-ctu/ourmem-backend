@@ -9,8 +9,10 @@ public class LoginRequest {
 
     @NotBlank(message = "Email is required")
     @Email(message = "Invalid email format")
+    @jakarta.validation.constraints.Size(max = 254)
     private String email;
 
     @NotBlank(message = "Password is required")
+    @jakarta.validation.constraints.Size(max = 256)
     private String password;
 }

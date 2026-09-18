@@ -6,7 +6,6 @@ import koi.ourmemory.dto.response.UserResponse;
 import koi.ourmemory.entity.User;
 import koi.ourmemory.exception.UnauthorizedException;
 import koi.ourmemory.repository.UserRepository;
-import koi.ourmemory.security.JwtTokenProvider;
 import koi.ourmemory.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -22,7 +21,7 @@ import java.util.UUID;
 public class AuthService {
 
     private final AuthenticationManager authenticationManager;
-    private final JwtTokenProvider jwtTokenProvider;
+    private final koi.ourmemory.security.AuthSessions sessions;
     private final UserRepository userRepository;
 
     public AuthResponse login(LoginRequest request) {
@@ -33,45 +32,28 @@ public class AuthService {
         SecurityContextHolder.getContext().setAuthentication(authentication);
         UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
 
-        String accessToken = jwtTokenProvider.generateAccessToken(userPrincipal.getId(), userPrincipal.getEmail());
-        String refreshToken = jwtTokenProvider.generateRefreshToken(userPrincipal.getId(), userPrincipal.getEmail());
-
-        return AuthResponse.builder()
-                .userId(userPrincipal.getId())
-                .email(userPrincipal.getEmail())
-                .displayName(userPrincipal.getDisplayName())
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
-                .tokenType("Bearer")
-                .build();
+        return response(sessions.create(userPrincipal.getId()));
     }
 
     public AuthResponse refreshToken(String refreshToken) {
-        if (!jwtTokenProvider.validateToken(refreshToken)) {
-            throw new UnauthorizedException("Invalid refresh token");
-        }
+        return response(sessions.refresh(refreshToken));
+    }
 
-        String tokenType = jwtTokenProvider.getTokenType(refreshToken);
-        if (!"REFRESH".equals(tokenType)) {
-            throw new UnauthorizedException("Token is not a refresh token");
-        }
+    public void logout(String refreshToken, String accessToken) {
+        sessions.revoke(refreshToken);
+        sessions.revoke(accessToken);
+    }
 
-        UUID userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
-        String email = jwtTokenProvider.getEmailFromToken(refreshToken);
-
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new UnauthorizedException("User not found"));
-
-        String newAccessToken = jwtTokenProvider.generateAccessToken(userId, email);
-        String newRefreshToken = jwtTokenProvider.generateRefreshToken(userId, email);
-
+    private AuthResponse response(koi.ourmemory.security.AuthSessions.Issued issued) {
+        User user = issued.user();
         return AuthResponse.builder()
                 .userId(user.getId())
                 .email(user.getEmail())
                 .displayName(user.getDisplayName())
-                .accessToken(newAccessToken)
-                .refreshToken(newRefreshToken)
-                .tokenType("Bearer")
+                .avatarUrl(user.getAvatarUrl())
+                .accessToken(issued.access())
+                .refreshToken(issued.refresh())
+                .tokenType("Cookie")
                 .build();
     }
 

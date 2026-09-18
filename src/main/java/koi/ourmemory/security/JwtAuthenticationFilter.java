@@ -2,74 +2,50 @@ package koi.ourmemory.security;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
-import jakarta.servlet.http.Cookie;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.*;
+import koi.ourmemory.exception.UnauthorizedException;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
-
 import java.io.IOException;
 
-@Component
-@RequiredArgsConstructor
-@Slf4j
+@Component @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    private final AuthSessions sessions;
 
-    private final JwtTokenProvider jwtTokenProvider;
-    private final CustomUserDetailsService userDetailsService;
-
-    @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
-        try {
-            String jwt = extractToken(request);
-
-            if (StringUtils.hasText(jwt) && jwtTokenProvider.validateToken(jwt)) {
-                String tokenType = jwtTokenProvider.getTokenType(jwt);
-                if ("ACCESS".equals(tokenType)) {
-                    String email = jwtTokenProvider.getEmailFromToken(jwt);
-                    UserDetails userDetails = userDetailsService.loadUserByUsername(email);
-
-                    UsernamePasswordAuthenticationToken authentication =
-                            new UsernamePasswordAuthenticationToken(
-                                    userDetails, null, userDetails.getAuthorities());
-                    authentication.setDetails(
-                            new WebAuthenticationDetailsSource().buildDetails(request));
-
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
-                }
-            }
-        } catch (Exception e) {
-            log.error("Cannot set user authentication: {}", e.getMessage());
-        }
-
-        filterChain.doFilter(request, response);
+    @Override protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        return path.startsWith("/api/public/") || path.startsWith("/api/webhooks/")
+                || path.equals("/api/health") || (path.startsWith("/api/auth/") && !path.equals("/api/auth/me"));
     }
 
-    private String extractToken(HttpServletRequest request) {
-        // Try cookie first
-        if (request.getCookies() != null) {
-            for (Cookie cookie : request.getCookies()) {
-                if ("access_token".equals(cookie.getName())) {
-                    return cookie.getValue();
-                }
+    @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+            FilterChain chain) throws ServletException, IOException {
+        String token = cookie(request, "access_token");
+        if (token != null) {
+            try {
+                UserPrincipal principal = sessions.authenticate(token);
+                var auth = new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
+                auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                SecurityContextHolder.getContext().setAuthentication(auth);
+            } catch (UnauthorizedException | io.jsonwebtoken.JwtException | IllegalArgumentException invalid) {
+                SecurityContextHolder.clearContext();
+            } catch (org.springframework.dao.DataAccessException unavailable) {
+                response.setStatus(503); response.setContentType("application/json");
+                response.getWriter().write("{\"success\":false,\"message\":\"Authentication service temporarily unavailable\"}");
+                return;
             }
         }
+        chain.doFilter(request, response);
+    }
 
-        // Fallback to Authorization header
-        String bearerToken = request.getHeader("Authorization");
-        if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
-            return bearerToken.substring(7);
+    public static String cookie(HttpServletRequest request, String name) {
+        if (request.getCookies() != null) for (Cookie cookie : request.getCookies()) {
+            if (name.equals(cookie.getName())) return cookie.getValue();
         }
-
         return null;
     }
 }
